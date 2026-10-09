@@ -29,6 +29,28 @@ def payload_cache(tmp_path, monkeypatch):
     return get_default_hermes_root() / "cache" / "uv"
 
 
+def test_update_merges_the_new_payload_into_an_existing_seed(payload_cache, tmp_path, monkeypatch):
+    """An update ships a payload cache for a new lock; its wheels must reach the machine cache.
+
+    Regression: ``.seeded`` meant "done forever" and existing top-level buckets were skipped, so an
+    updated install never saw the new pins' wheels and plugin rebuilds fetched them from PyPI.
+    """
+    code = tmp_path / "code"
+    code.mkdir()
+    (code / "uv.lock").write_text("version = 1  # old\n", encoding="utf-8")
+    monkeypatch.setattr(paths, "repo_root", lambda: code)
+    packages.uv_cache_dir()
+    local = payload_cache / "archive-v0" / "bucket" / "module.py"
+    local.write_text("in use\n", encoding="utf-8")
+
+    added = tmp_path / "payload" / "uv-cache" / "archive-v0" / "bucket" / "new.py"
+    added.write_text("new pin\n", encoding="utf-8")
+    (code / "uv.lock").write_text("version = 1  # new\n", encoding="utf-8")
+    packages.uv_cache_dir()
+    assert (payload_cache / "archive-v0" / "bucket" / "new.py").read_text(encoding="utf-8-sig") == "new pin\n"
+    assert local.read_text(encoding="utf-8-sig") == "in use\n", "existing cache files must not be rewritten"
+
+
 def test_partial_seed_is_retried_on_the_next_install(payload_cache, monkeypatch):
     real_copytree = shutil.copytree
     attempts: list[int] = []
@@ -46,4 +68,4 @@ def test_partial_seed_is_retried_on_the_next_install(payload_cache, monkeypatch)
 
     packages.uv_cache_dir()
     assert (payload_cache / ".seeded").is_file()
-    assert (payload_cache / "archive-v0" / "bucket" / "module.py").read_text(encoding="utf-8") == "seeded = True\n"
+    assert (payload_cache / "archive-v0" / "bucket" / "module.py").read_text(encoding="utf-8-sig") == "seeded = True\n"
